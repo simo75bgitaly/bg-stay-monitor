@@ -5,9 +5,9 @@ import time
 import random
 from datetime import datetime
 
-# --- CONFIGURAZIONE ---
-TELEGRAM_TOKEN = "8455845134:AAG_Z50lKPSw0QG2azwLSW7ZutOXZsL0bNY"
-CHAT_ID = "756817741" # Assicurati di aver messo il tuo ID qui
+# --- CONFIGURAZIONE SICURA ---
+TELEGRAM_TOKEN = st.secrets["TELEGRAM_TOKEN"]
+CHAT_ID = st.secrets["CHAT_ID"]
 
 # Tuo sito
 SITO = "topstaybergamo.com"
@@ -85,4 +85,5 @@ if st.button("🚀 AVVIA MONITORAGGIO"):
                         visti.add(entry.link)
                         time.sleep(1)
             
+
         time.sleep(frequenza * 60)

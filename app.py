@@ -3,91 +3,78 @@ import requests
 import feedparser
 import time
 import random
-from datetime import datetime
+import json
 
-# --- 1. CONFIGURAZIONE SICURA (DA SECRETS) ---
-# Assicurati di aver inserito questi nomi in Streamlit Settings -> Secrets
+# --- 1. CONFIGURAZIONE SICURA ---
 TELEGRAM_TOKEN = st.secrets["TELEGRAM_TOKEN"]
 CHAT_ID = st.secrets["CHAT_ID"]
+SITO_PROMO = "https://topstaybergamo.com"
 
-# --- 2. CONFIGURAZIONE FILTRI ASTUTI ---
-SITO_PROMO = "topstaybergamo.com"
-
-# Siti news da ignorare perché non hanno commenti o sono troppo grandi
-BLACKLIST_SITI = [
-    "corriere.it", "repubblica.it", "ansa.it", "ilgiorno.it", 
-    "ecodibergamo.it", "bergamonews.it", "lastampa.it", "ilfattoquotidiano.it"
-]
+# --- 2. FILTRI E MESSAGGI ---
+BLACKLIST_SITI = ["corriere.it", "repubblica.it", "ansa.it", "ecodibergamo.it", "bergamonews.it"]
+# Parole che se presenti scartano il post (Anti-Sport)
+FILTRI_NEGATIVI = ["atalanta", "serie a", "calcio", "partita", "stadio", "formazione", "risultati", "trasferta", "campionato"]
 
 MESSAGGI_PROMO = [
-    f"Ciao! Se cerchi un alloggio a Bergamo, ti suggerisco di guardare {SITO_PROMO}. Ci sono ottime soluzioni per affitti brevi!",
-    f"Benvenuto a Bergamo! Per trovare i migliori appartamenti e B&B, prova {SITO_PROMO}, è molto comodo.",
-    f"Se hai bisogno di info su dove dormire, su {SITO_PROMO} trovi una bella selezione di posti centrali a Bergamo."
+    f"Se cerchi un soggiorno di alto livello a Bergamo, ti suggerisco {SITO_PROMO}. Design e comfort superiore.",
+    f"Per un'esperienza di lusso, guarda gli appartamenti su {SITO_PROMO}. Molto meglio del classico hotel!",
+    f"Se preferisci eleganza e privacy in centro, su {SITO_PROMO} trovi suite stupende."
 ]
 
-def invia_telegram(messaggio):
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {"chat_id": CHAT_ID, "text": messaggio, "parse_mode": "Markdown"}
-    requests.post(url, json=payload)
+def invia_telegram(testo, url_destinazione):
+    url_api = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    tasti = {"inline_keyboard": [[
+        {"text": "🚀 VAI AL POST", "url": url_destinazione},
+        {"text": "🏠 IL MIO SITO", "url": SITO_PROMO}
+    ]]}
+    payload = {
+        "chat_id": CHAT_ID,
+        "text": testo,
+        "parse_mode": "Markdown",
+        "reply_markup": json.dumps(tasti)
+    }
+    requests.post(url_api, data=payload)
 
 # --- 3. INTERFACCIA ---
-st.set_page_config(page_title="BG Stay Smart Monitor", page_icon="🕵️‍♂️")
-st.title("🕵️‍♂️ BG Stay: Monitor Astuto")
+st.set_page_config(page_title="TopStay Luxury Monitor", page_icon="💎")
+st.title("💎 TopStay: Monitor Intelligente")
 
-st.sidebar.header("Filtri Attivi")
-usa_reddit = st.sidebar.checkbox("Reddit (Solo Domande)", value=True)
-usa_google = st.sidebar.checkbox("Google News (Filtrato)", value=True)
-frequenza = st.sidebar.slider("Controllo ogni (minuti)", 2, 60, 10)
+parole_default = "consiglio Bergamo b&b, migliori zone Bergamo dormire, luxury apartment bergamo, suite bergamo centro"
+parole_input = st.text_area("Parole chiave:", parole_default)
+frequenza = st.sidebar.slider("Controllo (minuti)", 5, 60, 15)
 
-parole_input = st.text_area("Parole chiave (separate da virgola)", 
-                            "consiglio hotel bergamo, dove dormire bergamo, b&b bergamo reddit")
-
-# --- 4. LOGICA DI MONITORAGGIO ---
+# --- 4. LOGICA ---
 if st.button("🚀 AVVIA MONITORAGGIO"):
     lista_parole = [p.strip() for p in parole_input.split(",") if p.strip()]
-    st.success(f"Monitoraggio avviato su: {', '.join(lista_parole)}")
+    st.success("Monitoraggio attivo. Filtri anti-sport e anti-spam caricati!")
     visti = set()
-    
+    primo_avvio = True
+
     while True:
         for parola in lista_parole:
             query = parola.replace(" ", "+")
+            # Cerchiamo su Reddit e Google News
+            fonti = [
+                f"https://www.reddit.com/search.rss?q={query}+self:yes&sort=new",
+                f"https://news.google.com/rss/search?q={query}&hl=it&gl=IT&ceid=IT:it"
+            ]
             
-            # --- REDDIT: SOLO DOMANDE (Self-posts) ---
-            if usa_reddit:
-                # 'self:yes' dice a Reddit di cercare solo post di testo (domande)
-                url_reddit = f"https://www.reddit.com/search.rss?q={query}+self:yes&sort=new"
-                feed = feedparser.parse(url_reddit)
+            for url_fonte in fonti:
+                feed = feedparser.parse(url_fonte)
                 for entry in feed.entries:
-                    if entry.link not in visti:
-                        risposta = random.choice(MESSAGGI_PROMO)
-                        msg = (
-                            f"❓ *DOMANDA SU REDDIT*\n"
-                            f"🔍 Parola: {parola}\n"
-                            f"📌 *{entry.title}*\n\n"
-                            f"🔗 [RISPONDI ORA]({entry.link})\n\n"
-                            f"💡 *Copia e incolla:*\n`{risposta}`"
-                        )
-                        invia_telegram(msg)
-                        visti.add(entry.link)
-
-            # --- GOOGLE NEWS: FILTRO BLACKLIST ---
-            if usa_google:
-                url_google = f"https://news.google.com/rss/search?q={query}&hl=it&gl=IT&ceid=IT:it"
-                feed = feedparser.parse(url_google)
-                for entry in feed.entries:
-                    # Controlla se il link è già visto o se appartiene alla blacklist
-                    is_blacklisted = any(sito in entry.link.lower() for sito in BLACKLIST_SITI)
+                    titolo = entry.title.lower()
+                    link = entry.link.lower()
                     
-                    if entry.link not in visti and not is_blacklisted:
-                        msg = (
-                            f"📰 *NEWS/BLOG COMMENTABILE*\n"
-                            f"🔍 Parola: {parola}\n"
-                            f"📌 *{entry.title}*\n\n"
-                            f"🔗 [APRI SITO]({entry.link})"
-                        )
-                        invia_telegram(msg)
+                    # CONTROLLI DI QUALITÀ
+                    is_blacklisted = any(s in link for s in BLACKLIST_SITI)
+                    is_sport = any(s in titolo for s in FILTRI_NEGATIVI)
+                    
+                    if entry.link not in visti and not is_blacklisted and not is_sport:
+                        if not primo_avvio:
+                            msg = f"🎯 *NUOVA OPPORTUNITÀ*\n📌 {entry.title}\n\n💡 *Copia:* `{random.choice(MESSAGGI_PROMO)}`"
+                            invia_telegram(msg, entry.link)
                         visti.add(entry.link)
-            
-            time.sleep(2) # Piccola pausa per non sovraccaricare
-            
+            time.sleep(2)
+        
+        primo_avvio = False
         time.sleep(frequenza * 60)

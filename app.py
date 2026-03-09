@@ -20,7 +20,19 @@ MESSAGGI_PROMO = [
 st.set_page_config(page_title="TopStay Monitor", layout="centered")
 st.title("💎 Monitor TopStay")
 
-# Sidebar compatta
+# Inizializzazione liste risultati se non esistono
+if 'res_tg' not in st.session_state: st.session_state.res_tg = []
+if 'res_reddit' not in st.session_state: st.session_state.res_reddit = []
+if 'res_web' not in st.session_state: st.session_state.res_web = []
+
+# Sidebar
+st.sidebar.header("Comandi")
+if st.sidebar.button("🗑️ PULISCI SCHERMO"):
+    st.session_state.res_tg = []
+    st.session_state.res_reddit = []
+    st.session_state.res_web = []
+    st.sidebar.success("Schermo pulito!")
+
 frequenza = st.sidebar.slider("Aggiorna ogni (min)", 5, 60, 15)
 parole_predefinite = '"dormire a Bergamo", "hotel Bergamo", "affitto breve bergamo", "soggiornare a Bergamo", "casa vacanze Bergamo"'
 parole_input = st.text_area("Target:", parole_predefinite)
@@ -36,16 +48,14 @@ def invia_telegram(testo):
     requests.post(url, data={"chat_id": CHAT_ID, "text": testo, "parse_mode": "Markdown"})
 
 # --- 3. LOGICA DI FILTRO E RICERCA ---
-if st.button("🚀 AVVIA"):
+if st.button("🚀 AVVIA MONITORAGGIO"):
     lista_parole = [p.strip().replace('"', '') for p in parole_input.split(",") if p.strip()]
-    st.info("Monitoraggio in corso... Controlla Telegram per le notifiche.")
+    st.info("Monitoraggio in corso... I nuovi risultati appariranno qui sotto.")
     
     visti = set()
     primo_avvio = True
 
     while True:
-        res_tg, res_reddit, res_web = [], [], []
-
         for parola in lista_parole:
             q_url = f'"{parola}"'.replace(" ", "+")
             
@@ -72,14 +82,14 @@ if st.button("🚀 AVVIA"):
                         visti.add(entry.link)
                         
                         item = f"📍 **{parola}**\n\n{entry.title}\n\n[Apri Link]({entry.link})\n---"
-                        if tipo == "telegram": res_tg.append(item)
-                        elif tipo == "reddit": res_reddit.append(item)
-                        else: res_web.append(item)
+                        if tipo == "telegram": st.session_state.res_tg.insert(0, item)
+                        elif tipo == "reddit": st.session_state.res_reddit.insert(0, item)
+                        else: st.session_state.res_web.insert(0, item)
 
-        # Scrittura nei contenitori
-        if res_tg: container_tg.markdown("\n".join(res_tg))
-        if res_reddit: container_reddit.markdown("\n".join(res_reddit))
-        if res_web: container_web.markdown("\n".join(res_web))
+        # Scrittura nei contenitori (aggiornati in tempo reale)
+        container_tg.markdown("\n".join(st.session_state.res_tg) if st.session_state.res_tg else "In attesa di Telegram...")
+        container_reddit.markdown("\n".join(st.session_state.res_reddit) if st.session_state.res_reddit else "In attesa di Reddit...")
+        container_web.markdown("\n".join(st.session_state.res_web) if st.session_state.res_web else "In attesa di Web...")
         
         primo_avvio = False
         time.sleep(frequenza * 60)

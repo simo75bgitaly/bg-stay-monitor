@@ -4,86 +4,79 @@ import feedparser
 import time
 import random
 
-# --- 1. CONFIGURAZIONE SICURA ---
+# --- 1. CONFIGURAZIONE E FILTRI ---
 TELEGRAM_TOKEN = st.secrets["TELEGRAM_TOKEN"]
 CHAT_ID = st.secrets["CHAT_ID"]
 SITO_PROMO = "https://topstaybergamo.com"
 
-# --- 2. FILTRI E MESSAGGI ---
 BLACKLIST_SITI = ["corriere.it", "repubblica.it", "ansa.it", "ecodibergamo.it", "bergamonews.it"]
-FILTRI_NEGATIVI = ["atalanta", "serie a", "calcio", "partita", "stadio", "formazione", "risultati", "trasferta", "campionato", "sport"]
+FILTRI_NEGATIVI = ["atalanta", "serie a", "calcio", "partita", "stadio", "risultati", "campionato", "monza"]
 
-MESSAGGI_PROMO = [
-    f"Se cerchi un soggiorno di alto livello a Bergamo, ti suggerisco {SITO_PROMO}. Design e comfort superiore.",
-    f"Per un'esperienza di lusso, guarda gli appartamenti su {SITO_PROMO}. Molto meglio del classico hotel!",
-    f"Se preferisci eleganza e privacy in centro, su {SITO_PROMO} trovi suite stupende."
-]
+# --- 2. INTERFACCIA ---
+st.set_page_config(page_title="TopStay Pro Monitor", layout="wide")
+st.title("💎 TopStay: Monitor Diviso per Fonti")
 
-def invia_telegram_semplice(testo):
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {"chat_id": CHAT_ID, "text": testo, "parse_mode": "Markdown"}
-    requests.post(url, data=payload)
+# Sidebar per impostazioni
+st.sidebar.header("Impostazioni")
+frequenza = st.sidebar.slider("Aggiornamento (minuti)", 5, 60, 15)
+parole_input = st.text_area("Parole chiave (esatte tra virgolette):", '"dormire a Bergamo", "hotel Bergamo centro"')
 
-# --- 3. INTERFACCIA CON FLAG ---
-st.set_page_config(page_title="TopStay Global Monitor", page_icon="💎")
-st.title("💎 TopStay: Monitor Intelligente")
+# Creazione delle Schede (Tabs)
+tab_tg, tab_reddit, tab_web = st.tabs(["📲 Telegram", "🧡 Reddit", "🌐 Google News/Blog"])
 
-# Barra laterale con i selettori (Flag)
-st.sidebar.header("Cosa monitorare?")
-usa_reddit = st.sidebar.checkbox("Reddit (Domande)", value=True)
-usa_google = st.sidebar.checkbox("Google News / Blog", value=True)
-usa_telegram = st.sidebar.checkbox("Gruppi/Canali Telegram", value=True)
-
-frequenza = st.sidebar.slider("Controllo ogni (minuti)", 5, 60, 15)
-
-parole_default = "consiglio Bergamo b&b, dove dormire bergamo, luxury apartment bergamo, suite bergamo centro"
-parole_input = st.text_area("Parole chiave target:", parole_default)
-
-# --- 4. LOGICA DI MONITORAGGIO ---
+# --- 3. LOGICA DI MONITORAGGIO ---
 if st.button("🚀 AVVIA MONITORAGGIO"):
     lista_parole = [p.strip() for p in parole_input.split(",") if p.strip()]
-    st.success("Monitoraggio avviato con i filtri selezionati!")
     visti = set()
     primo_avvio = True
+    
+    # Placeholder per visualizzare i risultati nelle schede corrette
+    area_tg = tab_tg.empty()
+    area_reddit = tab_reddit.empty()
+    area_web = tab_web.empty()
 
     while True:
+        # Liste temporanee per visualizzare gli ultimi risultati nelle Tab
+        results_tg, results_reddit, results_web = [], [], []
+
         for parola in lista_parole:
-            query_normale = parola.replace(" ", "+")
-            fonti = []
-            
-            # Aggiunge le fonti solo se il flag è attivo
-            if usa_reddit:
-                fonti.append(f"https://www.reddit.com/search.rss?q={query_normale}+self:yes&sort=new")
-            
-            if usa_google:
-                fonti.append(f"https://news.google.com/rss/search?q={query_normale}&hl=it&gl=IT&ceid=IT:it")
-            
-            if usa_telegram:
-                # Cerca menzioni di Telegram indicizzate sul web
-                query_tg = f"{parola} site:t.me".replace(" ", "+")
-                fonti.append(f"https://news.google.com/rss/search?q={query_tg}&hl=it&gl=IT&ceid=IT:it")
-            
-            for url_fonte in fonti:
-                feed = feedparser.parse(url_fonte)
+            # Ricerca forzata: usiamo le virgolette se l'utente non le ha messe
+            query_pulita = parola if '"' in parola else f'"{parola}"'
+            q_url = query_pulita.replace(" ", "+")
+
+            fonti = {
+                "reddit": f"https://www.reddit.com/search.rss?q={q_url}+self:yes&sort=new",
+                "web": f"https://news.google.com/rss/search?q={q_url}&hl=it&gl=IT&ceid=IT:it",
+                "telegram": f"https://news.google.com/rss/search?q={q_url}+site:t.me&hl=it&gl=IT&ceid=IT:it"
+            }
+
+            for tipo, url in fonti.items():
+                feed = feedparser.parse(url)
                 for entry in feed.entries:
                     titolo = entry.title.lower()
-                    link = entry.link.lower()
-                    
-                    is_blacklisted = any(s in link for s in BLACKLIST_SITI)
-                    is_sport = any(s in titolo for s in FILTRI_NEGATIVI)
-                    
-                    if entry.link not in visti and not is_blacklisted and not is_sport:
+                    # Verifica che TUTTE le parole della chiave siano presenti (Super Filtro)
+                    parole_chiave = parola.replace('"', '').lower().split()
+                    match_reale = all(p in titolo for p in parole_chiave)
+
+                    if entry.link not in visti and match_reale and not any(f in titolo for f in FILTRI_NEGATIVI):
                         if not primo_avvio:
-                            tipo = "📲 TELEGRAM" if "t.me" in link else "🎯 WEB/REDDIT"
-                            msg = (
-                                f"{tipo}\n"
-                                f"📌 *{entry.title}*\n"
-                                f"🔗 Link: {entry.link}\n\n"
-                                f"💡 *Copia:* `{random.choice(MESSAGGI_PROMO)}`"
-                            )
-                            invia_telegram_semplice(msg)
+                            # Invia a Telegram per notifica immediata
+                            msg = f"📍 FONTE: {tipo.upper()}\n📌 {entry.title}\n🔗 {entry.link}"
+                            requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", 
+                                          data={"chat_id": CHAT_ID, "text": msg})
+                        
                         visti.add(entry.link)
-            time.sleep(2)
+                        
+                        # Organizza per le Tab di Streamlit
+                        res_item = f"- **{entry.title}** \n[Apri Link]({entry.link})"
+                        if tipo == "telegram": results_tg.append(res_item)
+                        elif tipo == "reddit": results_reddit.append(res_item)
+                        else: results_web.append(res_item)
+
+        # Aggiorna l'interfaccia Streamlit
+        area_tg.markdown("\n".join(results_tg) if results_tg else "Nessun nuovo post Telegram")
+        area_reddit.markdown("\n".join(results_reddit) if results_reddit else "Nessun nuovo post Reddit")
+        area_web.markdown("\n".join(results_web) if results_web else "Nessun nuovo post Web")
         
         primo_avvio = False
         time.sleep(frequenza * 60)

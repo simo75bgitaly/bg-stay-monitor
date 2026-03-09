@@ -4,82 +4,82 @@ import feedparser
 import time
 import random
 
-# --- CONFIGURAZIONE ---
+# --- 1. CONFIGURAZIONE ---
 TELEGRAM_TOKEN = st.secrets["TELEGRAM_TOKEN"]
 CHAT_ID = st.secrets["CHAT_ID"]
 SITO_PROMO = "https://topstaybergamo.com"
 
-# Filtri per eliminare lo sport e le città sbagliate
-FILTRI_NEGATIVI = ["atalanta", "serie a", "serie b", "calcio", "coppa", "vince", "partita", "monza", "milano", "inter", "juve"]
+FILTRI_NEGATIVI = ["atalanta", "serie a", "serie b", "calcio", "basket", "hockey", "vince", "coppa", "campionato", "monza"]
 
-# --- INTERFACCIA ---
-st.set_page_config(page_title="TopStay Monitor", layout="wide")
-st.title("💎 TopStay: Monitor di Precisione")
+MESSAGGI_PROMO = [
+    f"Se cerchi eleganza in centro, su {SITO_PROMO} trovi suite stupende.",
+    f"Per un soggiorno di lusso a Bergamo, guarda {SITO_PROMO}. Design e comfort superiore."
+]
 
-# Sidebar
-st.sidebar.header("Parametri")
-frequenza = st.sidebar.slider("Aggiornamento (minuti)", 5, 60, 15)
+# --- 2. INTERFACCIA SMARTPHONE-FRIENDLY ---
+st.set_page_config(page_title="TopStay Monitor", layout="centered")
+st.title("💎 Monitor TopStay")
 
-# Inserisci le parole chiave separate da virgola
-parole_input = st.text_area("Parole chiave (es: b&b bergamo, hotel bergamo):", "casa vacanze bergamo, hotel bergamo")
+# Sidebar compatta
+frequenza = st.sidebar.slider("Aggiorna ogni (min)", 5, 60, 15)
+parole_predefinite = '"dormire a Bergamo", "hotel Bergamo", "affitto breve bergamo", "soggiornare a Bergamo", "casa vacanze Bergamo"'
+parole_input = st.text_area("Target:", parole_predefinite)
 
-# Creazione Tab
-tab_tg, tab_reddit, tab_web = st.tabs(["📲 Telegram", "🧡 Reddit", "🌐 Web & News"])
+# Spazio per i risultati divisi per categoria
+st.subheader("Risultati per Fonte")
+container_tg = st.expander("📲 SOCIAL & TELEGRAM", expanded=True)
+container_reddit = st.expander("🧡 DOMANDE REDDIT", expanded=False)
+container_web = st.expander("🌐 NEWS & BLOG", expanded=False)
 
 def invia_telegram(testo):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     requests.post(url, data={"chat_id": CHAT_ID, "text": testo, "parse_mode": "Markdown"})
 
-# --- LOGICA ---
-if st.button("🚀 AVVIA MONITORAGGIO"):
-    # Puliamo le parole chiave e le rendiamo una lista
-    lista_parole = [p.strip().lower() for p in parole_input.split(",") if p.strip()]
-    st.success(f"Monitoraggio attivo su {len(lista_parole)} chiavi esatte.")
+# --- 3. LOGICA DI FILTRO E RICERCA ---
+if st.button("🚀 AVVIA"):
+    lista_parole = [p.strip().replace('"', '') for p in parole_input.split(",") if p.strip()]
+    st.info("Monitoraggio in corso... Controlla Telegram per le notifiche.")
     
     visti = set()
     primo_avvio = True
 
     while True:
-        results_tg, results_reddit, results_web = [], [], []
+        res_tg, res_reddit, res_web = [], [], []
 
         for parola in lista_parole:
-            # Forziamo la ricerca con virgolette per Google
-            query_google = f'"{parola}"'.replace(" ", "+")
+            q_url = f'"{parola}"'.replace(" ", "+")
             
             fonti = {
-                "reddit": f"https://www.reddit.com/search.rss?q={query_google}&sort=new",
-                "web": f"https://news.google.com/rss/search?q={query_google}&hl=it&gl=IT&ceid=IT:it",
-                "telegram": f"https://news.google.com/rss/search?q={query_google}+site:t.me&hl=it&gl=IT&ceid=IT:it"
+                "reddit": f"https://www.reddit.com/search.rss?q={q_url}&sort=new",
+                "web": f"https://news.google.com/rss/search?q={q_url}&hl=it&gl=IT&ceid=IT:it",
+                "telegram": f"https://news.google.com/rss/search?q={q_url}+site:t.me&hl=it&gl=IT&ceid=IT:it"
             }
 
             for tipo, url in fonti.items():
                 feed = feedparser.parse(url)
                 for entry in feed.entries:
-                    titolo = entry.title.lower()
+                    titolo_low = entry.title.lower()
                     
-                    # --- IL SUPER FILTRO ---
-                    # 1. Controlla che la frase esatta sia presente
-                    check_esatto = parola in titolo
-                    # 2. Controlla che non ci siano parole sportive
-                    check_sport = any(s in titolo for s in FILTRI_NEGATIVI)
+                    # Filtro di precisione
+                    match = parola.lower() in titolo_low
+                    no_sport = not any(s in titolo_low for s in FILTRI_NEGATIVI)
 
-                    if entry.link not in visti and check_esatto and not check_sport:
+                    if entry.link not in visti and match and no_sport:
                         if not primo_avvio:
-                            msg = f"📍 FONTE: {tipo.upper()}\n🔍 Trovato: {parola}\n📌 {entry.title}\n🔗 {entry.link}"
-                            invia_telegram(msg)
+                            tag = "📲 TG" if tipo == "telegram" else "🌐 WEB"
+                            invia_telegram(f"📍 {tag}\n🔍 {parola}\n📌 {entry.title}\n🔗 {entry.link}")
                         
                         visti.add(entry.link)
                         
-                        # Organizzazione nelle Tab
-                        item = f"✅ **{entry.title}**\n[Link]({entry.link})"
-                        if tipo == "telegram": results_tg.append(item)
-                        elif tipo == "reddit": results_reddit.append(item)
-                        else: results_web.append(item)
+                        item = f"📍 **{parola}**\n\n{entry.title}\n\n[Apri Link]({entry.link})\n---"
+                        if tipo == "telegram": res_tg.append(item)
+                        elif tipo == "reddit": res_reddit.append(item)
+                        else: res_web.append(item)
 
-        # Aggiornamento UI
-        tab_tg.write("\n\n".join(results_tg) if results_tg else "In attesa di nuovi post Telegram...")
-        tab_reddit.write("\n\n".join(results_reddit) if results_reddit else "In attesa di nuovi post Reddit...")
-        tab_web.write("\n\n".join(results_web) if results_web else "In attesa di nuove News...")
+        # Scrittura nei contenitori
+        if res_tg: container_tg.markdown("\n".join(res_tg))
+        if res_reddit: container_reddit.markdown("\n".join(res_reddit))
+        if res_web: container_web.markdown("\n".join(res_web))
         
         primo_avvio = False
         time.sleep(frequenza * 60)
